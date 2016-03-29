@@ -74,18 +74,6 @@ colNames
 ```
 At the end of this step we are down to 46 covariates from 160 at the start.
 
-Lets plot the histograms of these variables to see if there is any log transformation required.
-```{r}
-par(mfrow=c(4,4),mar=c(3,3,1,1))
-for (i in 1:16) { hist(train2[,i],main=paste(i,colNames[i])) }
-par(mfrow=c(4,4),mar=c(3,3,1,1))
-for (i in 17:32) { hist(train2[,i],main=paste(i,colNames[i])) }
-par(mfrow=c(4,4),mar=c(3,3,1,1))
-for (i in 33:45) { hist(train2[,i],main=paste(i,colNames[i])) }
-```
-
-They look reasonable except for a few since most of the histograms are bell shaped. Lets move on.
-
 ## Split the data into training and cross validation set
 Lets split the cleaned up training data into 75% training and 25% cross validation datasets.
 ```{r}

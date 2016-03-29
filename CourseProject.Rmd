@@ -6,7 +6,7 @@ output: html_document
 ---
 
 # Summary
-This project describes the analysis of human activity regonition data to predict the quality of a particular type of exercise. In this report various aspects of feature selection, building and evaluation of models would be covered and a final model would be selected.
+This project describes the analysis of human activity regonition data to predict the quality of a particular type of exercise. In this report various aspects of feature selection, building and evaluation of models would be covered and a final model would be selected. Overall a random forest with 500 trees gave a best accuracy of about **99%** and an out of sample error as **0.6%**
 
 # Data Analysis
 First lets read the data and carry out exploratory analysis to select appropriate level1 and level2 covariates. At the end split the data into training and crossvalidation set.
@@ -74,6 +74,17 @@ colNames
 ```
 At the end of this step we are down to 46 covariates from 160 at the start.
 
+Lets plot the histogram of the remaining covariates and see if any log transformation is required.
+```{r}
+par(mfrow=c(4,4),mar=c(3,3,1,1))
+for (i in 1:16) { hist(train2[,i],main=paste(i,colNames[i])) }
+par(mfrow=c(4,4),mar=c(3,3,1,1))
+for (i in 17:32) { hist(train2[,i],main=paste(i,colNames[i])) }
+par(mfrow=c(4,4),mar=c(3,3,1,1))
+for (i in 33:45) { hist(train2[,i],main=paste(i,colNames[i])) }
+```
+Most of them look reasonbly bell shaped and a few aren't. This is good for now. Lets move on.
+
 ## Split the data into training and cross validation set
 Lets split the cleaned up training data into 75% training and 25% cross validation datasets.
 ```{r}
@@ -95,85 +106,41 @@ fit1 <- train(classe~.,method="rpart",data=training)
 fit1
 confusionMatrix(validation$classe, predict(fit1,validation))
 ```
-The accuracy is about **50%** and the error is **50%** (100%-accuracy). This is not a great number to start with. Lets see if this gets any better if we centre and scale the data.
-```{r}
-fit2 <- train(classe~., method="rpart", preProcess=c("center","scale"), data=training)
-fit2
-confusionMatrix(validation$classe, predict(fit2,validation))
-```
-This model is no different than the previous one.
+The accuracy is about **55%** and the error is **45%** (100%-accuracy). This is not a great number to start with. 
 
 ## Random Forest
-Since the model building is taking quite a bit of time on my computer I am going to train on a much smaller set and validate on a slightly larger set. I am going to repeat this experiment a few times to randomize the test.
+This took quite sometime to run on my macbook air - about an hour and half.
 ```{r}
-acc_val <- numeric(5)
 set.seed(12121)
-for (i in 1:5) {
-    # Subsample training data and For each class type pick about 100 rows of data
-    train_rf <- training[sample(which(train2$classe=="A"),100),]
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="B"),100),])
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="C"),100),])
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="D"),100),])
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="E"),100),])
-    # Fit a model
-    fit3 <- train(classe~.,method="rf",data=train_rf)
-    # Predict using the entire validation data and measure the accuracy.
-    acc_val[i] <- mean(validation$classe==predict(fit3,validation))
-}
-acc_val
-fit3
-confusionMatrix(validation$classe, predict(fit3, validation))
+fit2 <- train(classe~., method="rf",data=training)
+fit2
+confusionMatrix(validation$classe, predict(fit2, validation))
 ```
-This is a better model than the CART version. Accuracy is about **80%** and error rate is about **20%**. Since accuracy of the model isn't signifncantly different from run to run, lets select the model from last iteration as a candaidate.
+This is a better model than the CART version. Accuracy is about **99%** and out of sample error rate is about **0.6%**. Lets select this model as a candidate.
 
 ## Boosting with trees
+This ran much faster than the random forest. It took about 30 minutes.
 ```{r}
-acc_val <- numeric(5)
-set.seed(23232)
-for (i in 1:5) {
-    # Subsample training data and For each class type pick about 100 rows of data
-    train_rf <- training[sample(which(train2$classe=="A"),100),]
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="B"),100),])
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="C"),100),])
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="D"),100),])
-    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="E"),100),])
-    # Fit a model
-    fit4 <- train(classe~.,method="gbm",data=train_rf, verbose=FALSE)
-    # Predict using the entire validation data and measure the accuracy.
-    acc_val[i] <- mean(validation$classe==predict(fit4,validation))
-}
-acc_val
-fit4
-confusionMatrix(validation$classe, predict(fit4,validation))
+set.seed(123)
+fit3 <- train(classe~., method="gbm", data=training, verbose=FALSE)
+fit3
+confusionMatrix(validation$classe, predict(fit3,validation))
 ```
-This is as good as the Random Forest model and better than CART. Accuracy is about **80%** and error rate is about **20%**. Since accuracy of the model isn't signifncantly different from run to run, lets select the model from last iteration as a candidate.
+This is not as good as the Random Forest model and better than CART. Accuracy is about **96%** and out of sample error rate is about **4%**. 
 
-## Combining all three models
-Lets combine all three models above and see if we get any better performance.
-```{r}
-df <- data.frame(rf   = predict(fit3,validation),
-                 gbm  = predict(fit4,validation),
-                 classe = validation$classe)
-set.seed(45232)
-fitAll <- train(classe~., method="rf", data=df[sample(1:4904,200),],verbose=FALSE)
-fitAll
-```
-Again the overall model is as good as either Random forest or the Boosted trees at accuracy of about 80%.
+Overall the final model selected is the random forest one.
 
 ```{r}
 #save all the models.
-saveRDS(fit3, file = "RandomForest_model.rds")
-saveRDS(fit4, file = "BoostingTrees_model.rds")
-saveRDS(fitAll, file = "FinalModel.rds" )
+saveRDS(fit2, file = "RandomForest_model.rds")
+saveRDS(fit3, file = "BoostingTrees_model.rds")
 ```
 
 # Predict outcome on the test dataset
 Pick up relevant covariates needed for the model and then run through the model.
 ```{r}
 test2 <- test1[,colNames[1:45]]
-testDF <- data.frame(rf   = predict(fit3,test2),
-                     gbm  = predict(fit4,test2))
-predict(fitAll,testDF)
+predict(fit2,test2)
 ```
 
 

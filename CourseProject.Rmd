@@ -1,0 +1,199 @@
+---
+title: "Human Activity Recognition - Course Project"
+author: "Sridhar Pilli"
+date: "March 24, 2016"
+output: html_document
+---
+
+# Summary
+This project describes the analysis of human activity regonition data to predict the quality of a particular type of exercise. In this report various aspects of feature selection, building and evaluation of models would be covered and a final model would be selected.
+
+# Data Analysis
+First lets read the data and carry out exploratory analysis to select appropriate level1 and level2 covariates. At the end split the data into training and crossvalidation set.
+
+## Structure of the Data
+The publication of the authors descibes data containing **actual measurements** from the sensors placed on four different locations and **derived quanitities** from these actual measurements. Specifically there are
+1. **4** locations where sensors are placed - Forearm, Arm, Belt, Dumbell
+2. **12** Actual measurements taken from each location - Euler's angles (Roll, Pitch, Yaw), Acceleration(X,Y,Z), Gyroscope(X,Y,Z), Magnetometer(X,Y,Z)
+3. **8** Derived quanitites for each of the Euler's angles - Mean, Variance, Standard Deviation, Min, Max, Amplitude, Kurtosis, Skewness
+4. **2** Derived quantities for acceleration overall - Total and Variance.
+5. **7** Housekeeping variables such as timestamp, username etc. Of this the relevant one would be the "new_window".
+
+## Reading and cleaning the data
+Read the data from csv file 
+```{r,warning=FALSE}
+setwd("~/Documents/Git/Github/Project8/")
+# Read the csv files. Notice the data has quite a few empty cells. These are converted to NA while reading the file itself. 
+trainHAR <- read.csv("pml-training.csv", na.strings = "", stringsAsFactors = FALSE)
+testHAR <- read.csv("pml-testing.csv", na.strings = "", stringsAsFactors = FALSE)
+```
+
+## Level1 : Rawdata -> Covariates
+Convert the missing values to NAs, Divide-by-zeros to Inf and remove the first 7 columns as there isn't meaningful information there. Ideally had the testing data contained entries for the derived quantities such as mean, variance of measurementes we could have kept the num_window and new_window columns to group the data into windows and then compute the averages. 
+```{r,warning=FALSE}
+for(var in names(trainHAR)) { trainHAR[which(trainHAR[,var]=="#DIV/0!"),var] <- Inf }
+for(i in 8:ncol(trainHAR)-1) { trainHAR[,i] <- as.numeric(trainHAR[,i]) }
+trainHAR$classe <- as.factor(trainHAR$classe)
+train1 <- trainHAR[8:160]
+
+test1 <- testHAR[,8:159]
+for(i in 1:152) { test1[,i] <- as.numeric(test1[,i]) }
+```
+Lets get rid of those columns where there is either NA or Inf. 
+```{r}
+id1 <- sapply(train1[,1:152],function(x) { (mean(x)==Inf)|(is.na(mean(x))) })
+id2 <- sapply(test1[,1:152],function(x) { (mean(x)==Inf)|(is.na(mean(x))) })
+n1 <- names(train1); n2 <- names(test1)
+n <- union(n1[id1],n2[id2]) # these are the columns to get rid
+train1 <- train1[,setdiff(n1,n)]
+dim(train1)
+names(train1)
+test1 <- test1[,setdiff(n2,n)]
+dim(test1)
+names(test1)
+```
+At the end of this step we are down to 53 covariates from 160 in the training set
+
+## Level2 : Tidy covariates -> New covariates
+From the tidy covariates set let first figure out which ones have zero variance and can be removed right away. Note we are monitoring the stand alone variance without comparing other covariates. Lets keep those in with large variance. 
+```{r}
+library(caret)
+nzv <- nearZeroVar(train1,saveMetrics = TRUE)
+nzv
+```
+From the above output the "nzv" value for all the covaraites is FALSE indicating that their is no variable whose variance is small enough to be discarded.
+
+Next lets use findCorrelation() function in Caret package to figure out which variables can be dropped. The idea here is the measure the correlation of a particular covariate with other covariates and then discard those variates whose correlation is high. For this I am going to use a cutoff of 0.9. In other words if variable x1 and x2 are highly correlated with absolute correlation >0.9 then I am going to drop one of these variables.
+```{r,warning=FALSE}
+library(caret)
+cor_vals <- cor(train1[,1:52])
+drop_vars <- findCorrelation(cor_vals,cutoff=0.9) 
+colNames <- c(names(train1)[setdiff(1:52,drop_vars)], "classe")
+train2 <- train1[,colNames]
+colNames
+```
+At the end of this step we are down to 46 covariates from 160 at the start.
+
+Lets plot the histograms of these variables to see if there is any log transformation required.
+```{r}
+par(mfrow=c(4,4),mar=c(3,3,1,1))
+for (i in 1:16) { hist(train2[,i],main=paste(i,colNames[i])) }
+par(mfrow=c(4,4),mar=c(3,3,1,1))
+for (i in 17:32) { hist(train2[,i],main=paste(i,colNames[i])) }
+par(mfrow=c(4,4),mar=c(3,3,1,1))
+for (i in 33:45) { hist(train2[,i],main=paste(i,colNames[i])) }
+```
+
+They look reasonable except for a few since most of the histograms are bell shaped. Lets move on.
+
+## Split the data into training and cross validation set
+Lets split the cleaned up training data into 75% training and 25% cross validation datasets.
+```{r}
+set.seed(1234)
+inTrain <- createDataPartition(train2$classe,p=0.75,list=FALSE)
+training <- train2[inTrain,]
+validation <- train2[-inTrain,]
+dim(training)
+dim(validation)
+```
+
+# Model fitting
+The approach I would like to take here is to evaluate a bunch of classifiers and an ensemble of them to see which one gives higher accuracy and lower error rates.
+## CART
+```{r}
+require(caret);
+set.seed(34523)
+fit1 <- train(classe~.,method="rpart",data=training)
+fit1
+confusionMatrix(validation$classe, predict(fit1,validation))
+```
+The accuracy is about **50%** and the error is **50%** (100%-accuracy). This is not a great number to start with. Lets see if this gets any better if we centre and scale the data.
+```{r}
+fit2 <- train(classe~., method="rpart", preProcess=c("center","scale"), data=training)
+fit2
+confusionMatrix(validation$classe, predict(fit2,validation))
+```
+This model is no different than the previous one.
+
+## Random Forest
+Since the model building is taking quite a bit of time on my computer I am going to train on a much smaller set and validate on a slightly larger set. I am going to repeat this experiment a few times to randomize the test.
+```{r}
+acc_val <- numeric(5)
+set.seed(12121)
+for (i in 1:5) {
+    # Subsample training data and For each class type pick about 100 rows of data
+    train_rf <- training[sample(which(train2$classe=="A"),100),]
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="B"),100),])
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="C"),100),])
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="D"),100),])
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="E"),100),])
+    # Fit a model
+    fit3 <- train(classe~.,method="rf",data=train_rf)
+    # Predict using the entire validation data and measure the accuracy.
+    acc_val[i] <- mean(validation$classe==predict(fit3,validation))
+}
+acc_val
+fit3
+confusionMatrix(validation$classe, predict(fit3, validation))
+```
+This is a better model than the CART version. Accuracy is about **80%** and error rate is about **20%**. Since accuracy of the model isn't signifncantly different from run to run, lets select the model from last iteration as a candaidate.
+
+## Boosting with trees
+```{r}
+acc_val <- numeric(5)
+set.seed(23232)
+for (i in 1:5) {
+    # Subsample training data and For each class type pick about 100 rows of data
+    train_rf <- training[sample(which(train2$classe=="A"),100),]
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="B"),100),])
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="C"),100),])
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="D"),100),])
+    train_rf <- rbind(train_rf, training[sample(which(train2$classe=="E"),100),])
+    # Fit a model
+    fit4 <- train(classe~.,method="gbm",data=train_rf, verbose=FALSE)
+    # Predict using the entire validation data and measure the accuracy.
+    acc_val[i] <- mean(validation$classe==predict(fit4,validation))
+}
+acc_val
+fit4
+confusionMatrix(validation$classe, predict(fit4,validation))
+```
+This is as good as the Random Forest model and better than CART. Accuracy is about **80%** and error rate is about **20%**. Since accuracy of the model isn't signifncantly different from run to run, lets select the model from last iteration as a candidate.
+
+## Combining all three models
+Lets combine all three models above and see if we get any better performance.
+```{r}
+df <- data.frame(rf   = predict(fit3,validation),
+                 gbm  = predict(fit4,validation),
+                 classe = validation$classe)
+set.seed(45232)
+fitAll <- train(classe~., method="rf", data=df[sample(1:4904,200),],verbose=FALSE)
+fitAll
+```
+Again the overall model is as good as either Random forest or the Boosted trees at accuracy of about 80%.
+
+```{r}
+#save all the models.
+saveRDS(fit3, file = "RandomForest_model.rds")
+saveRDS(fit4, file = "BoostingTrees_model.rds")
+saveRDS(fitAll, file = "FinalModel.rds" )
+```
+
+# Predict outcome on the test dataset
+Pick up relevant covariates needed for the model and then run through the model.
+```{r}
+test2 <- test1[,colNames[1:45]]
+testDF <- data.frame(rf   = predict(fit3,test2),
+                     gbm  = predict(fit4,test2))
+predict(fitAll,testDF)
+```
+
+
+
+# Reference
+The data for this project has been generously provided from the source http://groupware.les.inf.puc-rio.br/har
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz43rRuixaU
+
